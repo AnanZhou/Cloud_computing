@@ -11,8 +11,6 @@ __author__ = "Vas Vasiliadis <vas@uchicago.edu>"
 import uuid
 import time
 import json
-from datetime import datetime
-
 import boto3
 from botocore.client import Config
 from boto3.dynamodb.conditions import Key
@@ -35,48 +33,33 @@ but you can replace the code below with your own if you prefer.
 @app.route("/annotate", methods=["GET"])
 @authenticated
 def annotate():
-    # Open a connection to the S3 service
     s3 = boto3.client(
         "s3",
         region_name=app.config["AWS_REGION_NAME"],
         config=Config(signature_version="s3v4"),
     )
 
-    bucket_name = app.config["AWS_S3_INPUTS_BUCKET"]
     user_id = session["primary_identity"]
+    key_name = f"{app.config['AWS_S3_KEY_PREFIX']}{user_id}/{str(uuid.uuid4())}~${{filename}}"
 
-    # Generate unique ID to be used as S3 key (name)
-    key_name = (
-        app.config["AWS_S3_KEY_PREFIX"]
-        + user_id
-        + "/"
-        + str(uuid.uuid4())
-        + "~${filename}"
-    )
+    redirect_url = request.url + "/job"
 
-    # Create the redirect URL
-    redirect_url = str(request.url) + "/job"
-
-    # Define policy conditions
-    encryption = app.config["AWS_S3_ENCRYPTION"]
-    acl = app.config["AWS_S3_ACL"]
     fields = {
         "success_action_redirect": redirect_url,
-        "x-amz-server-side-encryption": encryption,
-        "acl": acl,
+        "x-amz-server-side-encryption": app.config["AWS_S3_ENCRYPTION"],
+        "acl": app.config["AWS_S3_ACL"],
         "csrf_token": app.config["SECRET_KEY"],
     }
     conditions = [
         ["starts-with", "$success_action_redirect", redirect_url],
-        {"x-amz-server-side-encryption": encryption},
-        {"acl": acl},
+        {"x-amz-server-side-encryption": app.config["AWS_S3_ENCRYPTION"]},
+        {"acl": app.config["AWS_S3_ACL"]},
         ["starts-with", "$csrf_token", ""],
     ]
 
-    # Generate the presigned POST call
     try:
         presigned_post = s3.generate_presigned_post(
-            Bucket=bucket_name,
+            Bucket=app.config["AWS_S3_INPUTS_BUCKET"],
             Key=key_name,
             Fields=fields,
             Conditions=conditions,
@@ -84,12 +67,9 @@ def annotate():
         )
     except ClientError as e:
         app.logger.error(f"Unable to generate presigned URL for upload: {e}")
-        return abort(500)
+        return abort(500)  # Error page for server error
 
-    # Render the upload form which will parse/submit the presigned POST
-    return render_template(
-        "annotate.html", s3_post=presigned_post, role=session["role"]
-    )
+    return render_template("annotate.html", s3_post=presigned_post, role=session["role"])
 
 
 """Fires off an annotation job
@@ -103,25 +83,50 @@ homework assignments
 
 
 @app.route("/annotate/job", methods=["GET"])
+@authenticated
 def create_annotation_job_request():
-
+    # access value in config.py
+    # https://flask.palletsprojects.com/en/3.0.x/config/
     region = app.config["AWS_REGION_NAME"]
+    dynamodb = boto3.resource('dynamodb', region_name=region)
+    table = dynamodb.Table(app.config["AWS_DYNAMODB_ANNOTATIONS_TABLE"])
 
-    # Parse redirect URL query parameters for S3 object info
     bucket_name = request.args.get("bucket")
     s3_key = request.args.get("key")
+    last_part = s3_key.split('/')[-1]
+    job_id = last_part.split('~')[0]
+    input_filename = last_part.split('~')[-1]
+    submit_time = int(datetime.now(timezone.utc).timestamp())
+    user_id = session["primary_identity"]
 
-    # Extract the job ID from the S3 key
-    # Move your code here
+    data = {
+        "job_id": job_id,
+        "user_id": user_id,
+        "input_file_name": input_filename,
+        "s3_inputs_bucket": bucket_name,
+        "s3_key_input_file": s3_key,
+        "submit_time": submit_time,
+        "job_status": "PENDING"
+    }
 
-    # Persist job to database
-    # Move your code here...
+    try:
+        table.put_item(Item=data)
+    except ClientError as e:
+        app.logger.error(f"Error writing to DynamoDB: {e}")
+        return abort(500)  # Server error page if DynamoDB write fails
 
-    # Send message to request queue
-    # Move your code here...
+    try:
+        sns_client = boto3.client('sns', region_name=region)
+        sns_client.publish(
+            TopicArn=app.config["AWS_SNS_JOB_REQUEST_TOPIC"],
+            Message=json.dumps({'default': json.dumps(data)}),
+            MessageStructure='json'
+        )
+    except ClientError as e:
+        app.logger.error(f"Error posting request to SNS: {e}")
+        return abort(500)  # Server error page if SNS post fails
 
     return render_template("annotate_confirm.html", job_id=job_id)
-
 
 """List all annotations for the user
 """
