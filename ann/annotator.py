@@ -79,7 +79,7 @@ def process_message(message):
         s3_client.download_file(bucket_name, key, local_filename)
 
         ann_process = subprocess.Popen(['python', 'run.py', local_filename])
-        ann_process.wait()
+        
         
         # Update job status in DynamoDB
         # https://docs.python.org/3/library/asyncio-subprocess.html#asyncio.subprocess.Process.returncode
