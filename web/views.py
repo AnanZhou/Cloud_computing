@@ -15,9 +15,15 @@ import boto3
 from botocore.client import Config
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
+from datetime import datetime, timezone
+# Import decimal for handling DynamoDB's decimal 
+#https://stackoverflow.com/questions/70343666/python-boto3-float-types-are-not-supported-use-decimal-types-instead
+import decimal
 
-from flask import abort, flash, redirect, render_template, request, session, url_for
-
+from flask import abort, flash, redirect, render_template, request, session, url_for, jsonify, request
+# Import ZoneInfo from zoneinfo module
+# https://www.educative.io/answers/what-is-zoneinfozoneinfokey-in-python
+from zoneinfo import ZoneInfo 
 from app import app, db
 from decorators import authenticated, is_premium
 
@@ -67,6 +73,8 @@ def annotate():
         )
     except ClientError as e:
         app.logger.error(f"Unable to generate presigned URL for upload: {e}")
+        # use abort in python
+        # https://www.w3schools.com/python/ref_os_abort.asp#:
         return abort(500)  # Error page for server error
 
     return render_template("annotate.html", s3_post=presigned_post, role=session["role"])
@@ -85,8 +93,6 @@ homework assignments
 @app.route("/annotate/job", methods=["GET"])
 @authenticated
 def create_annotation_job_request():
-    # access value in config.py
-    # https://flask.palletsprojects.com/en/3.0.x/config/
     region = app.config["AWS_REGION_NAME"]
     dynamodb = boto3.resource('dynamodb', region_name=region)
     table = dynamodb.Table(app.config["AWS_DYNAMODB_ANNOTATIONS_TABLE"])
@@ -128,35 +134,142 @@ def create_annotation_job_request():
 
     return render_template("annotate_confirm.html", job_id=job_id)
 
+
 """List all annotations for the user
 """
 
 
 @app.route("/annotations", methods=["GET"])
+@authenticated
 def annotations_list():
+    user_id = session.get("primary_identity")
+    if not user_id:
+        abort(403)  # Forbidden access if not authenticated
 
-    # Get list of annotations to display
+    dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+    table = dynamodb.Table(app.config["AWS_DYNAMODB_ANNOTATIONS_TABLE"])
+    
+    # Convert UTC to CST using ZoneInfo
+    # https://community-forums.domo.com/main/discussion/53456/convert-timestamp-to-cst-ust-mst-est-python
+    cst = ZoneInfo('America/Chicago')
 
-    return render_template("annotations.html", annotations=None)
+    try:
+        response = table.query(
+            IndexName='user_id_index',  # The name of the secondary index
+            KeyConditionExpression=Key('user_id').eq(user_id)
+        )
+    except ClientError as e:
+        app.logger.error(f"Error fetching annotations from DynamoDB: {e}")
+        abort(500)  # Internal server error
 
+    jobs = response.get('Items', [])
+    # Format the date/time and adjust to CST
+    for job in jobs:
+        # Convert Decimal to int for timestamp
+        if 'submit_time' in job:
+            utc_timestamp = int(job['submit_time'])
+            utc_time = datetime.fromtimestamp(utc_timestamp, tz=ZoneInfo('UTC'))
+            cst_time = utc_time.astimezone(cst)
+            job['submit_time'] = cst_time.strftime('%Y-%m-%d %H:%M:%S')
+
+    # Check if there are no jobs found
+    if not jobs:
+        flash("No annotations found", "info")
+
+    return render_template("annotations.html", annotations=jobs)
+
+def generate_presigned_url(bucket_name, object_name, expiration=3600):
+    """Generate a presigned URL to share an S3 object"""
+    s3_client = boto3.client(
+        "s3",
+        region_name=app.config["AWS_REGION_NAME"],
+        config=Config(signature_version="s3v4"),
+    )
+    try:
+        response = s3_client.generate_presigned_url('get_object',
+                                                    Params={'Bucket': bucket_name,
+                                                            'Key': object_name},
+                                                    ExpiresIn=expiration)
+    except ClientError as e:
+        app.logger.error(f"Couldn't generate presigned URL: {e}")
+        abort(500)
+    return response
 
 """Display details of a specific annotation job
 """
 
-
 @app.route("/annotations/<id>", methods=["GET"])
+@authenticated
 def annotation_details(id):
-    pass
+    user_id = session.get("primary_identity")
+    if not user_id:
+        abort(403)  # User is not authenticated
 
+    dynamodb = boto3.resource('dynamodb', region_name=app.config["AWS_REGION_NAME"])
+    table = dynamodb.Table(app.config["AWS_DYNAMODB_ANNOTATIONS_TABLE"])
+
+    try:
+        response = table.get_item(
+            Key={'job_id': id}
+        )
+        job = response.get('Item', None)
+        if not job or job['user_id'] != user_id:
+            abort(403)  # Unauthorized access to a job not owned by the user
+        
+        # Generate download URLs for input and result files
+        # https://boto3.amazonaws.com/v1/documentation/api/latest/guide/s3-presigned-urls.html
+        input_file_url = generate_presigned_url(app.config['AWS_S3_INPUTS_BUCKET'], job['s3_key_input_file'])
+        results_file_url = generate_presigned_url(app.config['AWS_S3_RESULTS_BUCKET'], job['s3_key_result_file']) if job['job_status'] == 'COMPLETED' else None
+        
+        # Convert times to human-readable CST format
+        cst_zone = ZoneInfo('America/Chicago')
+        if 'submit_time' in job:
+            submit_time = int(job['submit_time'])  # Convert Decimal to int
+            job['submit_time'] = datetime.fromtimestamp(submit_time).astimezone(cst_zone).strftime('%Y-%m-%d %H:%M:%S')
+
+        if 'complete_time' in job and job['complete_time'] is not None:
+            complete_time = int(job['complete_time'])  # Convert Decimal to int
+            job['complete_time'] = datetime.fromtimestamp(complete_time).astimezone(cst_zone).strftime('%Y-%m-%d %H:%M:%S')
+
+    except ClientError as e:
+        app.logger.error(f"Error fetching job from DynamoDB: {e}")
+        abort(500)  # Internal Server Error
+    
+
+    return render_template("annotation.html", job=job, input_file_url=input_file_url, results_file_url=results_file_url)  # Render HTML with job details
 
 """Display the log file contents for an annotation job
 """
 
 
 @app.route("/annotations/<id>/log", methods=["GET"])
+@authenticated
 def annotation_log(id):
-    pass
+    user_id = session.get("primary_identity")
+    if not user_id:
+        abort(403)  # Unauthorized access
 
+    dynamodb = boto3.resource('dynamodb', region_name=app.config["AWS_REGION_NAME"])
+    table = dynamodb.Table(app.config["AWS_DYNAMODB_ANNOTATIONS_TABLE"])
+
+    try:
+        response = table.get_item(Key={'job_id': id})
+        job = response.get('Item')
+        if not job or job['user_id'] != user_id:
+            abort(403)  # Unauthorized access
+
+        # Retrieve the log file from S3
+        s3_client = boto3.client('s3')
+        log_file_key = job.get('s3_key_log_file')
+        obj = s3_client.get_object(Bucket=app.config['AWS_S3_RESULTS_BUCKET'], Key=log_file_key)
+        log_content = obj['Body'].read().decode('utf-8')  # Decode the content to a string
+        # https://www.tutorialspoint.com/python/string_decode.htm
+        
+    except ClientError as e:
+        app.logger.error(f"Error fetching log file: {e}")
+        abort(500)  # Internal Server Error
+
+    return render_template("view_log.html", job_id=id, log_content=log_content)
 
 """Subscription management handler
 """
