@@ -17,7 +17,6 @@ config.read('notify_config.ini')
 def send_notification_email(job):
     """Send an email notification about the completion of a job."""
     user_profile = helpers.get_user_profile(job['user_id'])
-    #print(user_profile)  # Debug print to verify the structure of user_profile
     # If user_profile is a list and email is the third element
     if isinstance(user_profile, list):
         user_email = user_profile[2]  # 'Email' is the third element in the list
@@ -25,7 +24,6 @@ def send_notification_email(job):
         print("Unexpected user_profile format")
         return  # Return or handle error appropriately
 
-    ses_client = boto3.client('ses', region_name=config['aws']['AwsRegionName'])
     sender = config['ses']['SenderEmail']
     recipient = user_email
     subject = f"Results available for job {job['job_id']}"
@@ -36,7 +34,8 @@ def send_notification_email(job):
     )
 
     try:
-        helpers.send_email_ses(ses_client, sender, recipient, subject, body)
+        # Adjusting the call to match the helper function signature
+        helpers.send_email_ses(recipients=recipient, sender=sender, subject=subject, body=body)
         print("Email sent successfully!")
     except ClientError as e:
         print(f"Failed to send email: {e}")

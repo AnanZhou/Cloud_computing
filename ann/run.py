@@ -8,6 +8,7 @@ import driver
 import configparser
 import logging
 import json
+
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -55,48 +56,50 @@ def update_dynamodb(job_id, data):
                 ':js': 'COMPLETED'
             }
         )
-        print("DynamoDB update successful")
+        logging.info("DynamoDB update successful")
         return True
     except Exception as e:
-        print(f"Failed to update DynamoDB: {str(e)}")
+        logging.error(f"Failed to update DynamoDB: {str(e)}")
         return False
 
-def send_sns_notification(topic_arn, job_id, bucket_name, key):
-    """Send a notification to SNS about job completion."""
+def send_sns_notification(topic_arn, data):
+    """Send a notification to SNS about job completion with detailed job information."""
     sns_client = boto3.client('sns', region_name=AWS_REGION)
     message = json.dumps({
-        'job_id': job_id,
-        's3_inputs_bucket': bucket_name,
-        's3_key_input_file': key,
+        'job_id': data['job_id'],
+        'user_id': data['user_id'],
+        'input_file_name': data['input_file_name'],
+        's3_inputs_bucket': data['s3_inputs_bucket'],
+        's3_key_input_file': data['s3_key_input_file'],
+        'complete_time': data['complete_time'],
+        'job_status': data['job_status'],
         'message': 'Job completed successfully'
     })
     try:
         response = sns_client.publish(TopicArn=topic_arn, Message=message)
         logging.info(f"Notification sent to SNS. Message ID: {response['MessageId']}")
         return True
-    except boto3.exceptions.Boto3Error as e:
-        logging.error(f"Failed to send SNS notification due to Boto3 error: {str(e)}")
+    except ClientError as e:
+        logging.error(f"Failed to send SNS notification due to client error: {str(e)}")
         return False
-    except Exception as e:
-        logging.error(f"Unexpected error while sending SNS notification: {str(e)}")
-        return False
+
 
 def upload_file_to_s3(file_path, bucket, object_name):
     s3_client = boto3.client('s3', region_name=AWS_REGION)
     try:
         s3_client.upload_file(file_path, bucket, object_name)
-        print(f"File {file_path} uploaded to {bucket}/{object_name}")
+        logging.info(f"File {file_path} uploaded to {bucket}/{object_name}")
         return True
     except (NoCredentialsError, PartialCredentialsError, ClientError) as e:
-        print(f"Failed to upload {file_path}. Error: {str(e)}")
+        logging.error(f"Failed to upload {file_path}. Error: {str(e)}")
         return False
 
 def delete_local_file(file_path):
     try:
         os.remove(file_path)
-        print(f"Deleted local file {file_path}")
+        logging.info(f"Deleted local file {file_path}")
     except OSError as e:
-        print(f"Error: {file_path} : {e.strerror}")
+        logging.error(f"Error: {file_path} : {e.strerror}")
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
@@ -114,24 +117,36 @@ if __name__ == '__main__':
 
         s3_results_key = f"{cnet_id}/{user_prefix}/{unique_id}/{os.path.basename(results_file)}"
         s3_log_key = f"{cnet_id}/{user_prefix}/{unique_id}/{os.path.basename(log_file)}"
+        
+        # Upload results file to S3
+        upload_file_to_s3(results_file, bucket_name, s3_results_key)
+        
+        # Upload log file to S3
+        upload_file_to_s3(log_file, bucket_name, s3_log_key)
 
-        if upload_file_to_s3(results_file, bucket_name, s3_results_key) and upload_file_to_s3(log_file, bucket_name, s3_log_key):
-            delete_local_file(results_file)
-            delete_local_file(log_file)
+        # Update DynamoDB
+        update_dynamodb(unique_id, {
+            's3_results_bucket': bucket_name,
+            's3_key_result_file': s3_results_key,
+            's3_key_log_file': s3_log_key
+        })
 
-            update_data = {
-                's3_results_bucket': bucket_name,
-                's3_key_result_file': s3_results_key,
-                's3_key_log_file': s3_log_key
-            }
-            if update_dynamodb(unique_id, update_data):
-                if send_sns_notification(SNS_TOPIC_ARN, unique_id, bucket_name, s3_results_key):
-                    print("SNS notification sent successfully.")
-                else:
-                    print("Failed to send SNS notification.")
-            else:
-                print("Failed to update DynamoDB.")
-        else:
-            print("Failed to upload files to S3.")
+        # Prepare data for SNS notification
+        notification_data = {
+            'job_id': unique_id,
+            'user_id': user_prefix,
+            'input_file_name': os.path.basename(input_file_path),
+            's3_inputs_bucket': bucket_name,
+            's3_key_input_file': s3_results_key,
+            'complete_time': int(time.time()),
+            'job_status': 'COMPLETED'
+        }
+
+        # Send SNS notification
+        send_sns_notification(SNS_TOPIC_ARN, notification_data)
+        
+        # Delete local files
+        delete_local_file(results_file)
+        delete_local_file(log_file)
     else:
-        print("A valid .vcf file must be provided as input to this program.")
+        logging.error("A valid .vcf file must be provided as input to this program.")
