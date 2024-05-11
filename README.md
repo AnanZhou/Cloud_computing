@@ -10,7 +10,7 @@ Directory contents are as follows:
 I am using Flas app with an SNS-Subscribed Endpoint approach to complete my archive utility. The most important advantange of this approach is its even-driven architecture. This Flask app is processing messages as they come in through SNS notification. This is resource-efficient. I am expecting high volumes of archival requests where immediacy and real-time processing are crucial so that I choose Flask app approach.
 
 
-In terms of timely archive, I chhose to use AWS step function. The first reason is that this step function allows me to manage the sequence of conditions of state transitions without needing to handle the wait logic within my application code which sinmplifes workflows. One important feature of Step function is stateless, they can scale automatically to handle increases in request without manual intervention which satifsy our goal: system needs to manage several of archival tasks simultaneously. 
+In terms of timely archive, I choose to use AWS step function. The first reason is that this step function allows me to manage the sequence of conditions of state transitions without needing to handle the wait logic within my application code which sinmplifes workflows. One important feature of Step function is stateless, they can scale automatically to handle increases in request without manual intervention which satifsy our goal: system needs to manage several of archival tasks simultaneously. 
 
 Here is an overview of my state machine:
 first state: AnnotationCompleted
