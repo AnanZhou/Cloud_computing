@@ -105,6 +105,7 @@ def create_annotation_job_request():
     input_filename = last_part.split('~')[-1]
     submit_time = int(datetime.now(timezone.utc).timestamp())
     user_id = session["primary_identity"]
+    user_role=session['role']
 
     data = {
         "job_id": job_id,
@@ -121,7 +122,8 @@ def create_annotation_job_request():
     except ClientError as e:
         app.logger.error(f"Error writing to DynamoDB: {e}")
         return abort(500)  # Server error page if DynamoDB write fails
-
+    
+    data['user_status'] = user_role
     sns_message = json.dumps({'default': json.dumps(data)})
    
     try:
@@ -205,6 +207,7 @@ def generate_presigned_url(bucket_name, object_name, expiration=3600):
 @authenticated
 def annotation_details(id):
     user_id = session.get("primary_identity")
+    user_role=session['role']
     if not user_id:
         abort(403)  # User is not authenticated
 
@@ -218,11 +221,17 @@ def annotation_details(id):
         job = response.get('Item', None)
         if not job or job['user_id'] != user_id:
             abort(403)  # Unauthorized access to a job not owned by the user
+        
+        # check if the job results are archived
+        is_archived = job.get('results_file_archive_id', False)
 
         # Generate download URLs for input and result files
         # https://boto3.amazonaws.com/v1/documentation/api/latest/guide/s3-presigned-urls.html
         input_file_url = generate_presigned_url(app.config['AWS_S3_INPUTS_BUCKET'], job['s3_key_input_file'])
-        results_file_url = generate_presigned_url(app.config['AWS_S3_RESULTS_BUCKET'], job['s3_key_result_file']) if job['job_status'] == 'COMPLETED' else None
+        results_file_url = None
+        if job['job_status'] == 'COMPLETED':
+            if user_role != "free_user" or not is_archived:
+               results_file_url = generate_presigned_url(app.config['AWS_S3_RESULTS_BUCKET'], job['s3_key_result_file']) if job['job_status'] == 'COMPLETED' else None
 
         # Convert times to human-readable CST format
         cst_zone = ZoneInfo('America/Chicago')
@@ -281,6 +290,7 @@ from auth import update_profile
 
 
 @app.route("/subscribe", methods=["GET", "POST"])
+@authenticated
 def subscribe():
     if request.method == "GET":
         # Display form to get subscriber credit card info

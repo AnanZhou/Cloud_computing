@@ -13,16 +13,13 @@ https://stackoverflow.com/questions/11620698/how-to-trigger-a-file-download-when
 {% block title %}Annotation Details{% endblock %}
 
 {% block body %}
-
     {% include "header.html" %}
 
     <div class="container">
-
         <div class="page-header">
             <h1>Annotation Details</h1>
         </div>
 
-        <!-- DISPLAY ANNOTATION JOB DETAILS -->
         <div class="panel panel-default">
             <div class="panel-body">
                 <h3>Job ID: {{ job.job_id }}</h3>
@@ -32,8 +29,12 @@ https://stackoverflow.com/questions/11620698/how-to-trigger-a-file-download-when
 
                 {% if job.job_status == 'COMPLETED' %}
                     <p><strong>Complete Time:</strong> {{ job.complete_time }}</p>
-                    <p><strong>Results File:</strong><a href="{{ results_file_url }}" download>download</a></p>
-                    <p><strong>Log File:</strong> <a href="{{ url_for('annotation_log', id=job.job_id) }}">view</a></p>
+                    {% if results_file_url %}
+                        <p><strong>Results File:</strong> <a href="{{ results_file_url }}" download>Download</a></p>
+                    {% else %}
+                        <p><strong>Results File:</strong> <a href="/make-me-premium">Upgrade to Premium for download</a></p>
+                    {% endif %}
+                    <p><strong>Log File:</strong> <a href="{{ url_for('annotation_log', id=job.job_id) }}">View</a></p>
                 {% endif %}
             </div>
         </div>
@@ -43,5 +44,4 @@ https://stackoverflow.com/questions/11620698/how-to-trigger-a-file-download-when
         <a href="{{ url_for('annotations_list') }}">&larr; back to annotations list</a>
 
     </div> <!-- container -->
-
 {% endblock %}

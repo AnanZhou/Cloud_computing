@@ -8,6 +8,7 @@ import logging
 import configparser
 
 # Setup logging
+# https://stackoverflow.com/questions/13479295/python-using-basicconfig-method-to-log-to-console-and-file
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Load configuration file
@@ -23,10 +24,18 @@ INPUTS_BUCKET_NAME = config['s3']['InputsBucketName']
 RESULTS_BUCKET_NAME = config['s3']['ResultsBucketName']
 KEY_PREFIX = config['s3']['KeyPrefix']
 ANNOTATIONS_TABLE = config['dynamodb']['AnnotationsTable']
+JOB_DIRECTORY_PATH = config['ann']['JobDirectory']
 
 # Initialize AWS clients and resources
-sqs = boto3.resource('sqs', region_name=AWS_REGION)
-queue = sqs.Queue(QUEUE_URL)
+
+try:
+    sqs = boto3.resource('sqs', region_name=AWS_REGION)
+    queue = sqs.Queue(QUEUE_URL)
+    logging.info("Connected to SQS queue: %s", QUEUE_URL)
+except (ClientError, NoCredentialsError) as e:
+    logging.error("Failed to initialize SQS queue: %s", str(e))
+    raise e 
+
 s3_client = boto3.client('s3', region_name=AWS_REGION, config=Config(signature_version='s3v4'))
 dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
 table = dynamodb.Table(ANNOTATIONS_TABLE)
@@ -39,6 +48,10 @@ def process_message(message):
         job_id = data['job_id']
         bucket_name = data['s3_inputs_bucket']
         key = data['s3_key_input_file']
+        # get user role from request sns topic
+        user_role = data['user_status']
+        # get user_id from request SNS topic
+        user_id = data['user_id']
 
         # Check the current status of the job in DynamoDB
         response = table.get_item(Key={'job_id': job_id})
@@ -49,15 +62,16 @@ def process_message(message):
                 message.delete()  # Delete the message from the queue
                 return
 
-        job_dir = os.path.join('./jobs', job_id)
+        job_dir = os.path.join(JOB_DIRECTORY_PATH, job_id)
         os.makedirs(job_dir, exist_ok=True)
         local_filename = os.path.join(job_dir, os.path.basename(key))
 
         # Download the file from S3
         s3_client.download_file(bucket_name, key, local_filename)
 
-        # Launch the annotation process
-        subprocess.Popen(['python', 'run.py', local_filename])
+        # Launch the annotation process without blocking call 
+        # https://stackoverflow.com/questions/16071866/non-blocking-subprocess-call
+        subprocess.Popen(['python', 'run.py', local_filename,user_role,user_id,job_id])
 
         # Update DynamoDB status to RUNNING
         table.update_item(
@@ -75,6 +89,8 @@ def process_message(message):
         logging.error(f"Error processing message: {str(e)}")
 
 # Main loop for message polling
+# Poll the message queue in a loop using long polling
+# https://stackoverflow.com/questions/76498541/optimal-method-to-long-poll-keep-on-retrieving-new-sqs-messages
 while True:
     try:
         messages = queue.receive_messages(WaitTimeSeconds=WAIT_TIME, MaxNumberOfMessages=MAX_MESSAGES)

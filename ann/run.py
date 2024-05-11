@@ -13,22 +13,26 @@ import json
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Load configuration file
+# https://docs.python.org/3/library/configparser.html
 config = configparser.ConfigParser()
 config.read('annotator_config.ini')
 
 # Access configuration values
+# https://docs.python.org/3/library/configparser.html
 AWS_REGION = config.get('aws', 'AwsRegionName')
 INPUTS_BUCKET_NAME = config.get('s3', 'InputsBucketName')
 RESULTS_BUCKET_NAME = config.get('s3', 'ResultsBucketName')
 KEY_PREFIX = config.get('s3', 'KeyPrefix')
 ANNOTATIONS_TABLE = config.get('dynamodb', 'AnnotationsTable')
-USER_ID = config.get('gas', 'user_id')
+
 CNET_ID = config['DEFAULT']['CnetId']
-
+STATEMACHINE_ARN = config['state']['Arn']
 # Reuslt SNS
-
+# do not use in this time
 SNS_Result_TOPIC_ARN = config['sns']['JobResultsTopic']
 
+# Archive sns
+SNS_Archive_Topic_ARN = config['sns']['JobArchiveTopic']
 
 class Timer(object):
     def __init__(self, verbose=True):
@@ -46,6 +50,8 @@ class Timer(object):
 
 def update_dynamodb(job_id, data):
     """Update DynamoDB table with job completion details."""
+    #  update dynamodb
+    # https://stackoverflow.com/questions/55256127/update-item-in-dynamodb
     dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
     table = dynamodb.Table(ANNOTATIONS_TABLE)
     try:
@@ -72,12 +78,13 @@ def send_sns_notification(topic_arn, data):
     message = json.dumps({
         'job_id': data['job_id'],
         'user_id': data['user_id'],
+        'user_status': data['user_status'],
         'input_file_name': data['input_file_name'],
         's3_inputs_bucket': data['s3_inputs_bucket'],
         's3_key_input_file': data['s3_key_input_file'],
         'complete_time': data['complete_time'],
         'job_status': data['job_status'],
-        'message': 'Job completed successfully'
+        'message': 'Job ready for archival'
     })
     try:
         response = sns_client.publish(TopicArn=topic_arn, Message=message)
@@ -105,9 +112,27 @@ def delete_local_file(file_path):
     except OSError as e:
         logging.error(f"Error: {file_path} : {e.strerror}")
 
+def start_state_machine(state_machine_arn, input_data):
+    """Starts an AWS Step Functions state machine execution."""
+    sf_client = boto3.client('stepfunctions', region_name=AWS_REGION)
+    try:
+        response = sf_client.start_execution(
+            stateMachineArn=state_machine_arn,
+            input=json.dumps(input_data)
+        )
+        logging.info("State Machine started successfully: %s", response['executionArn'])
+        return response
+    except ClientError as e:
+        logging.error("Failed to start state machine: %s", e)
+        return None
+
+
 if __name__ == '__main__':
-    if len(sys.argv) > 1:
+    if len(sys.argv) > 4:
         input_file_path = sys.argv[1].strip()
+        user_role = sys.argv[2].strip() # capture user role
+        user_id = sys.argv[3].strip() # capture user_id
+        job_id = sys.argv[4].strip() # capture job id
         with Timer():
             results_file = input_file_path.replace('.vcf', '.annot.vcf')
             log_file = input_file_path + '.count.log'
@@ -116,9 +141,10 @@ if __name__ == '__main__':
 
         bucket_name = RESULTS_BUCKET_NAME
         cnet_id = CNET_ID
-        user_prefix = USER_ID
-        unique_id = os.path.basename(input_file_path).split('~')[0]
-
+        user_prefix = user_id
+        #unique_id = os.path.basename(input_file_path).split('~')[0]
+        unique_id = job_id
+       
         s3_results_key = f"{cnet_id}/{user_prefix}/{unique_id}/{os.path.basename(results_file)}"
         s3_log_key = f"{cnet_id}/{user_prefix}/{unique_id}/{os.path.basename(log_file)}"
         
@@ -135,19 +161,22 @@ if __name__ == '__main__':
             's3_key_log_file': s3_log_key
         })
 
-        # Prepare data for SNS notification
+        # Prepare data for SNS notification(archive SNS topic)
         notification_data = {
             'job_id': unique_id,
             'user_id': user_prefix,
+            'user_status': user_role, # include user status
             'input_file_name': os.path.basename(input_file_path),
             's3_inputs_bucket': bucket_name,
             's3_key_input_file': s3_results_key,
             'complete_time': int(time.time()),
             'job_status': 'COMPLETED'
         }
-
-        # Send SNS notification to result Topic
-        send_sns_notification(SNS_Result_TOPIC_ARN, notification_data)
+        
+        # start state machine
+        # https://docs.aws.amazon.com/step-functions/latest/dg/tutorial-get-started-create-execute-state-machine.html
+        state_machine_arn = STATEMACHINE_ARN
+        start_state_machine(state_machine_arn, notification_data)
         
         # Delete local files
         delete_local_file(results_file)

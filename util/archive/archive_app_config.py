@@ -32,10 +32,10 @@ class Config(object):
     # AWS DynamoDB table
     AWS_DYNAMODB_ANNOTATIONS_TABLE = f"{iam_username}_annotations"
     
-    #SQS Setting(do I need wait time and max message?) result sqs
+    #SQS Setting:result sqs
     SQS_URL= "https://sqs.us-east-1.amazonaws.com/127134666975/zhoua_a14_job_results"
 
-    #SNS Setting result sns
+    #SNS Setting archive sns
     Topic_ARN = "arn:aws:sns:us-east-1:127134666975:zhoua_a14_archive"
 
 
