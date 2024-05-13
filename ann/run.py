@@ -164,8 +164,8 @@ if __name__ == '__main__':
         # Prepare data for SNS notification(archive SNS topic)
         notification_data = {
             'job_id': unique_id,
-            'user_id': user_prefix,
-            'user_status': user_role, # include user status
+            'user_id': user_prefix, # 
+            'user_status': user_role, # include user status 
             'input_file_name': os.path.basename(input_file_path),
             's3_inputs_bucket': bucket_name,
             's3_key_input_file': s3_results_key,

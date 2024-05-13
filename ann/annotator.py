@@ -72,7 +72,8 @@ def process_message(message):
         # Launch the annotation process without blocking call 
         # https://stackoverflow.com/questions/16071866/non-blocking-subprocess-call
         subprocess.Popen(['python', 'run.py', local_filename,user_role,user_id,job_id])
-
+       
+       
         # Update DynamoDB status to RUNNING
         table.update_item(
             Key={'job_id': job_id},
