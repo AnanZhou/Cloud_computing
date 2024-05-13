@@ -4,16 +4,17 @@ Copyright (C) 2015-2023 Vas Vasiliadis <vas@uchicago.edu>
 University of Chicago
 -->
 
+<!--how to add link feature in some textinput:
+https://stackoverflow.com/questions/11620698/how-to-trigger-a-file-download-when-clicking-an-html-button-or-javascript
+-->
 {% extends "base.html" %}
 
 {% block title %}Annotations{% endblock %}
 
 {% block body %}
-
     {% include "header.html" %}
 
     <div class="container">
-
         <div class="page-header">
             <h1>My Annotations</h1>
         </div>
@@ -27,6 +28,30 @@ University of Chicago
         </div>
 
         <!-- DISPLAY LIST OF ANNOTATION JOBS -->
+        {% if annotations %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Request Time</th>
+                        <th>Input File Name</th>
+                        <th>Job Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for job in annotations %}
+                        <tr>
+                            <td><a href="{{ url_for('annotation_details', id=job.job_id) }}">{{ job.job_id }}</a></td>
+                            <td>{{ job.submit_time }}</td>
+                            <td>{{ job.input_file_name }}</td>
+                            <td>{{ job.job_status }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p>No annotations found.</p>
+        {% endif %}
 
     </div> <!-- container -->
 
