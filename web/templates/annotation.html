@@ -9,21 +9,36 @@ University of Chicago
 {% block title %}Annotation Details{% endblock %}
 
 {% block body %}
-    
     {% include "header.html" %}
 
     <div class="container">
-
         <div class="page-header">
             <h1>Annotation Details</h1>
         </div>
 
-        <!-- DISPLAY ANNOTATION JOB DETAILS -->
+        <div class="panel panel-default">
+            <div class="panel-body">
+                <h3>Job ID: {{ job.job_id }}</h3>
+                <p><strong>Request Time:</strong> {{ job.submit_time }}</p>
+                <p><strong>Status:</strong> {{ job.job_status }}</p>
+                <p><strong>Input File Name:</strong> <a href="{{ input_file_url }}" download>{{ job.input_file_name }}</a></p>
+
+                {% if job.job_status in ['COMPLETED', 'RESTORED','RESTORING'] %}
+                    <p><strong>Complete Time:</strong> {{ job.complete_time }}</p>
+                    {% if results_file_url %}
+                        <p><strong>Results File:</strong> <a href="{{ results_file_url }}" download>Download</a></p>
+                    {% elif is_restoring %}
+                        <p><strong>Results File:</strong> File is being restored; please check back later</p>
+                    {% else %}
+                        <p><strong>Results File:</strong> <a href="/subscribe">Upgrade to Premium for download</a></p>
+                    {% endif %}
+                    <p><strong>Log File:</strong> <a href="{{ url_for('annotation_log', id=job.job_id) }}">View</a></p>
+                {% endif %}
+            </div>
+        </div>
 
         <hr />
 
         <a href="{{ url_for('annotations_list') }}">&larr; back to annotations list</a>
-
     </div> <!-- container -->
-
 {% endblock %}
