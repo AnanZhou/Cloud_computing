@@ -149,13 +149,18 @@ class Config(object):
 
     AWS_GLACIER_VAULT = "ucmpcs"
 
+    AWS_ACCOUNT_TABLE = "zhoua_accounts"
+
     # AWS SNS topics
     AWS_SNS_JOB_REQUEST_TOPIC = (
-        f"arn:aws:sns:us-east-1:127134666975:{iam_username}_a10_job_requests"
+        f"arn:aws:sns:us-east-1:127134666975:{iam_username}_a17_job_requests"
     )
+    AWS_SNS_RESTORE_REQUEST_TOPIC = "arn:aws:sns:us-east-1:127134666975:zhoua_a17_restore_requests"
 
+    AWS_SNS_THAW_REQUEST_TOPIC = "arn:aws:sns:us-east-1:127134666975:zhoua_a17_thaw_requests"
+    
     # AWS SQS queues
-    AWS_SQS_REQUESTS_QUEUE_NAME = "zhoua_a10_job_requests"
+    AWS_SQS_REQUESTS_QUEUE_NAME = "zhoua_a17_job_requests"
 
     # AWS DynamoDB table
     AWS_DYNAMODB_ANNOTATIONS_TABLE = f"{iam_username}_annotations"
