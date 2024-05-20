@@ -1,3 +1,32 @@
+#Reference: https://askubuntu.com/questions/222348/what-does-sudo-apt-get-update-do
 #!/bin/bash -ex
+
+# Update package repository
+apt-get update
+
+
+# Create a directory called 'gas'
+mkdir -p /home/ubuntu/gas
+
+# Download the GAS source code from S3
+# https://docs.aws.amazon.com/AmazonS3/latest/userguide/download-objects.html
+aws s3 cp s3://mpcs-students/zhoua/gas.zip /home/ubuntu/
+
+# Extract all files contained in gas.zip directly into the 'gas' directory
+unzip /home/ubuntu/gas.zip -d /home/ubuntu/gas
+
+# Remove the ZIP file after extraction
+rm /home/ubuntu/gas.zip
+
+# Change ownership of GAS files
+# https://docs.oracle.com/cd/E19683-01/816-4883/6mb2joat2/index.html
+chown -R ubuntu:ubuntu /home/ubuntu/gas
+
+# Make the run_gas.sh script executable
+chmod +x /home/ubuntu/gas/web/run_gas.sh
+
+
+# Run the web server app as the ubuntu user
+sudo -u ubuntu /home/ubuntu/gas/web/run_gas.sh
 
 ### EOUserData
