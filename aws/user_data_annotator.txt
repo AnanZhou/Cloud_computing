@@ -1,3 +1,37 @@
 #!/bin/bash -ex
+#!/bin/bash
 
+# Update package repository
+apt-get update
+
+# Install necessary packages
+# https://virtualenvwrapper.readthedocs.io/en/latest/
+apt-get install -y python3 virtualenvwrapper
+
+# Create a directory called 'gas'
+mkdir -p /home/ubuntu/gas
+
+# Download the GAS source code from S3
+aws s3 cp s3://mpcs-students/zhoua/gas.zip /home/ubuntu/
+
+# Extract all files contained in gas.zip directly into the 'gas' directory
+unzip /home/ubuntu/gas.zip -d /home/ubuntu/gas
+
+# Remove the ZIP file after extraction
+rm /home/ubuntu/gas.zip
+
+# Change ownership of GAS files
+chown -R ubuntu:ubuntu /home/ubuntu/gas
+
+
+
+# Source the virtualenvwrapper script to enable 'workon' command
+# https://stackoverflow.com/questions/7538628/virtualenvwrapper-functions-unavailable-in-shell-scripts
+source /usr/local/bin/virtualenvwrapper.sh
+
+# Make the run_ann.sh script executable
+chmod +x /home/ubuntu/gas/ann/run_ann.sh
+
+# Run the python script as the ubuntu user
+sudo -u ubuntu bash -c "source /usr/local/bin/virtualenvwrapper.sh && workon mpcs && /home/ubuntu/gas/ann/run_ann.sh"
 ### EOUserData
